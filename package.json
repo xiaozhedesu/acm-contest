@@ -1,22 +1,44 @@
 {
   "name": "koishi-plugin-acm-contest",
   "description": "算法竞赛",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
   "files": [
     "lib",
     "dist"
   ],
+  "contributors": [
+    "xiaozhedesu <xiaozhedesu0219@outlook.com>",
+    "authou <1251734828@qq.com>"
+  ],
   "license": "MIT",
+  "homepage": "https://github.com/xiaozhedesu/acm-contest",
   "scripts": {},
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xiaozhedesu/acm-contest.git"
+  },
   "keywords": [
     "chatbot",
     "koishi",
-    "plugin"
+    "plugin",
+    "acm",
+    "算法竞赛"
   ],
   "devDependencies": {},
   "peerDependencies": {
     "koishi": "^4.18.0"
+  },
+  "koishi": {
+    "description": {
+      "en": "algorithm contest search",
+      "zh": "查询算法竞赛信息，开发中"
+    }
+  },
+  "dependencies": {
+    "codeforces-api-ts": "^3.0.1",
+    "jsdom": "^25.0.1",
+    "koishi-plugin-puppeteer": "^3.9.0"
   }
 }
