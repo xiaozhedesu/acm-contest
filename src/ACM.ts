@@ -1,7 +1,6 @@
-import { } from "koishi-plugin-puppeteer"
 import { JSDOM } from 'jsdom'
 import { CodeforcesAPI } from "codeforces-api-ts"
-import { User } from 'codeforces-api-ts/dist/types';
+import { logger } from "./index"
 
 
 // html转DOM元素进行操作的依赖
@@ -11,7 +10,7 @@ const { window } = new JSDOM(`<!DOCTYPE html><p>Hello world</p>`);
  * 牛客相关函数
  */
 export namespace Niuke {
-    class UserProfile {
+    export class UserProfile {
         userName: string;
         userID: string;
         rating: number;
@@ -24,7 +23,11 @@ export namespace Niuke {
             this.userName = userName;
         }
 
-        toString() {
+        /**
+         * 生成文字版个人信息
+         * @returns 返回转换后的文字
+         */
+        toMessage(): string {
             let res: string = "";
             res += `昵称: ${this.userName}\n`;
             res += `rating: ${this.rating}\n`;
@@ -33,13 +36,115 @@ export namespace Niuke {
             res += `已过题数：${this.passNumber}\n`
             return res;
         }
+
+        /**
+         * 根据用户名找对应的userID
+         * @returns 无异常返回'OK'，否则返回错误信息
+         */
+        async getUserID(): Promise<string> {
+            const response = await fetch(`https://ac.nowcoder.com/acm/contest/rating-index?searchUserName=${this.userName}`)
+            if (response.status !== 200) {
+                throw new Error(`获取失败：HTTP ${response.status}`);
+            }
+            const htmlText = await response.text();
+
+            // html文本转DOM
+            const parser = new window.DOMParser();
+            const doc: Document = parser.parseFromString(htmlText, 'text/html');
+
+            const table = doc.getElementsByTagName('table')[0];
+            if (table === undefined) {
+                return '查无此人，请确认名称输入正确且6个月内参加过至少一场牛客竞赛';
+            }
+            const td = table.getElementsByTagName('tr')[1].getElementsByTagName('td')[1];
+            const name = td.getElementsByTagName('span')[0].innerHTML;
+            if (name !== this.userName) {
+                return '查无此人，请确认名称输入正确且6个月内参加过至少一场牛客竞赛';
+            }
+            let profileURL = td.getElementsByTagName('a')[0].getAttribute('href').split('/');
+            this.userID = profileURL[profileURL.length - 1];
+
+            return 'OK';
+        }
+
+        /**
+         * 通过用户名获取用户在牛客上的刷题/竞赛数据
+         * @returns 无异常返回'OK'，否则返回错误信息
+         */
+        async getProfileData(): Promise<string> {
+            let status = await this.getUserID();
+            if (status !== 'OK') {
+                return status;
+            }
+
+            await fetch(`https://ac.nowcoder.com/acm/contest/profile/${this.userID}`)
+                .then(response => {
+                    if (response.status === 200) {
+                        return response.text()
+                    } else {
+                        throw new Error(`获取失败：HTTP ${response.status}`);
+                    }
+                })
+                .then(htmlText => {
+                    // html文本转DOM
+                    const parser = new window.DOMParser();
+                    const doc: Document = parser.parseFromString(htmlText, 'text/html');
+
+                    const contestStateItems = doc.getElementsByClassName('my-state-main')[0].getElementsByClassName('my-state-item');
+                    const rating = contestStateItems[0].getElementsByTagName('div')[0].innerHTML;
+                    this.rating = parseInt(rating);
+                    this.rank = contestStateItems[1].getElementsByTagName('div')[0].innerHTML;
+                    this.contestNumberRated = parseInt(contestStateItems[2].getElementsByTagName('div')[0].innerHTML);
+                    this.contestNumberUnrated = parseInt(contestStateItems[3].getElementsByTagName('div')[0].innerHTML);
+                }).catch(error => {
+                    logger.error(error)
+                    status = error.message;
+                });
+            if (status != 'OK') return status;
+
+            await fetch(`https://ac.nowcoder.com/acm/contest/profile/${this.userID}/practice-coding`)
+                .then(response => {
+                    if (response.status === 200) {
+                        return response.text()
+                    } else {
+                        throw new Error(`获取失败：HTTP ${response.status}`);
+                    }
+                })
+                .then(htmlText => {
+                    // html文本转DOM
+                    const parser = new window.DOMParser();
+                    const doc: Document = parser.parseFromString(htmlText, 'text/html');
+
+                    const stateItems = doc.getElementsByClassName('my-state-main')[0].getElementsByClassName('my-state-item');
+                    this.passNumber = parseInt(stateItems[1].getElementsByTagName('div')[0].innerHTML);
+                }).catch(error => {
+                    logger.error(error)
+                    status = error.message;
+                })
+            return status;
+        }
+    }
+
+    /**
+     * 根据用户名获取数据后返回一个UserProfile对象
+     * @param userName 用户名
+     * @returns 获取完数据的UserProfile对象
+     */
+    export async function initUserProfile(userName: string): Promise<UserProfile> {
+        let userProfile: UserProfile = new UserProfile(userName);
+        const status = await userProfile.getProfileData();
+        if (status !== 'OK') {
+            throw new Error(status);
+        } else {
+            return userProfile;
+        }
     }
 
     class Contest {
         contestName: string;
         countdown: string;
 
-        toString() {
+        toMessage(): string {
             return `${this.contestName}\n${this.countdown}`;
         }
     }
@@ -49,117 +154,29 @@ export namespace Niuke {
      * @param index 下标，范围为0-2
      * @returns 查询后的字符串
      */
-    export async function getContest(index: number) {
-        let message = "";
+    export async function getContest(index: number): Promise<string> {
         let contest = new Contest();
         const url = "https://ac.nowcoder.com";
-        await fetch(url, { method: 'GET' })
-            .then(response => {
-                if (response.status === 200) {
-                    return response.text()
-                } else {
-                    message = `HTTP:${response.status} error`;
-                }
-            })
-            .then(htmlText => {
-                // html文本转DOM
-                const parser = new window.DOMParser();
-                const doc: Document = parser.parseFromString(htmlText, 'text/html');
+        try {
+            const response = await fetch(url, { method: 'GET' })
+            if (response.status !== 200) {
+                throw new Error(`获取失败：HTTP ${response.status}`);
+            }
+            const htmlText = await response.text();
+            // html文本转DOM
+            const parser = new window.DOMParser();
+            const doc: Document = parser.parseFromString(htmlText, 'text/html');
 
-                const acmList = doc.getElementsByClassName('acm-list');
-                const acmItems = acmList[0].getElementsByClassName('acm-item');
-                contest.contestName = acmItems[index].getElementsByTagName('a')[0].innerHTML;
-                contest.countdown = acmItems[index].getElementsByClassName('acm-item-time')[0].innerHTML.trim();
-            }).catch(error => {
-                console.error(error)
-                message = error.toString();
-            });
-        message += contest.toString();
-        return message;
-    }
+            const acmList = doc.getElementsByClassName('acm-list');
+            const acmItems = acmList[0].getElementsByClassName('acm-item');
+            contest.contestName = acmItems[index].getElementsByTagName('a')[0].innerHTML;
+            contest.countdown = acmItems[index].getElementsByClassName('acm-item-time')[0].innerHTML.trim();
 
-    /**
-     * 通过用户名获取用户在牛客上的刷题/竞赛数据
-     * @param user UserProfile对象，userName需要提前存入
-     * @returns 异步程序的执行状态，无异常返回'OK'，否则返回错误信息
-     */
-    async function getProfileData(user: UserProfile) {
-        let status: string = 'OK';
-        // 通过用户名获取用户ID
-        // 需要6个月内参加过一场牛客竞赛才能查到
-        await fetch(`https://ac.nowcoder.com/acm/contest/rating-index?searchUserName=${user.userName}`)
-            .then(response => {
-                if (response.status === 200) {
-                    return response.text()
-                } else {
-                    status = `HTTP:${response.status} error`;
-                }
-            })
-            .then(htmlText => {
-                if (status != 'OK') return status;
-                // html文本转DOM
-                const parser = new window.DOMParser();
-                const doc: Document = parser.parseFromString(htmlText, 'text/html');
-
-                const table = doc.getElementsByTagName('table')[0];
-                if (table === undefined) {
-                    status = '查无此人，请确认名称输入正确且6个月内参加过至少一场牛客竞赛';
-                    return;
-                }
-                const td = table.getElementsByTagName('tr')[1].getElementsByTagName('td')[1];
-                let profileURL = td.getElementsByTagName('a')[0].getAttribute('href').split('/');
-                user.userID = profileURL[profileURL.length - 1];
-            }).catch(error => {
-                console.error(error)
-                status = error.toString();
-            });
-        if (status != 'OK') return status;
-
-        await fetch(`https://ac.nowcoder.com/acm/contest/profile/${user.userID}`)
-            .then(response => {
-                if (response.status === 200) {
-                    return response.text()
-                } else {
-                    status = `HTTP:${response.status} error`;
-                }
-            })
-            .then(htmlText => {
-                // html文本转DOM
-                const parser = new window.DOMParser();
-                const doc: Document = parser.parseFromString(htmlText, 'text/html');
-
-                const contestStateItems = doc.getElementsByClassName('my-state-main')[0].getElementsByClassName('my-state-item');
-                const rating = contestStateItems[0].getElementsByTagName('div')[0].innerHTML;
-                user.rating = parseInt(rating);
-                user.rank = contestStateItems[1].getElementsByTagName('div')[0].innerHTML;
-                user.contestNumberRated = parseInt(contestStateItems[2].getElementsByTagName('div')[0].innerHTML);
-                user.contestNumberUnrated = parseInt(contestStateItems[3].getElementsByTagName('div')[0].innerHTML);
-            }).catch(error => {
-                console.error(error)
-                status = error.toString();
-            });
-        if (status != 'OK') return status;
-
-        await fetch(`https://ac.nowcoder.com/acm/contest/profile/${user.userID}/practice-coding`)
-            .then(response => {
-                if (response.status === 200) {
-                    return response.text()
-                } else {
-                    status = `HTTP:${response.status} error`;
-                }
-            })
-            .then(htmlText => {
-                // html文本转DOM
-                const parser = new window.DOMParser();
-                const doc: Document = parser.parseFromString(htmlText, 'text/html');
-
-                const stateItems = doc.getElementsByClassName('my-state-main')[0].getElementsByClassName('my-state-item');
-                user.passNumber = parseInt(stateItems[1].getElementsByTagName('div')[0].innerHTML);
-            }).catch(error => {
-                console.error(error)
-                status = error.toString();
-            });
-        return status;
+            return contest.toMessage();
+        } catch (e) {
+            logger.error(e);
+            return e.message;
+        }
     }
 
     /**
@@ -167,15 +184,13 @@ export namespace Niuke {
      * @param userName 用户名
      * @returns 查询后的字符串
      */
-    export async function getProfile(userName: string) {
-        let message = "Niuke Profile:\n"
-        let user: UserProfile = new UserProfile(userName);
-        let status = await getProfileData(user);
-        if (status !== 'OK') {
-            return status;
+    export async function getProfile(userName: string): Promise<string> {
+        try {
+            let userProfile: UserProfile = await initUserProfile(userName);
+            return `Niuke Profile:\n${userProfile.toMessage()}`;
+        } catch (e) {
+            return e.message;
         }
-        message += user.toString();
-        return message;
     }
 }
 
@@ -192,9 +207,17 @@ export namespace Atcoder {
 
         constructor(userName: string) {
             this.userName = userName;
+            this.nowRating = 0;
+            this.maxRating = 0;
+            this.rank = 'NaN';
+            this.contestNumber = 0;
         }
 
-        toString() {
+        /**
+         * 生成文字版个人信息
+         * @returns 返回转换后的文字
+         */
+        toMessage(): string {
             let res: string = `用户名：${this.userName}\n`
             res += `当前rating：${this.nowRating}\n`
             res += `最高rating：${this.maxRating}\n`
@@ -205,13 +228,47 @@ export namespace Atcoder {
             }
             return res;
         }
+
+        /**
+         * 通过用户名获取用户在Atcoder上的竞赛数据
+         * @returns 无异常返回'OK'，否则返回错误信息
+         */
+        async getProfileData(): Promise<string> {
+            try {
+                const response = await fetch(`https://atcoder.jp/users/${this.userName}`)
+                if (response.status !== 200) {
+                    throw new Error(`获取失败：HTTP ${response.status}`);
+                }
+                const htmlText = await response.text();
+                // html文本转DOM
+                const parser = new window.DOMParser();
+                const doc: Document = parser.parseFromString(htmlText, 'text/html');
+
+                const main = doc.getElementById('main-container');
+                const mainDiv = main.getElementsByTagName('div')[0];
+                const content = mainDiv.getElementsByTagName('div')[2].getElementsByTagName('table')[0];
+                // 匹配用户存在但是没有rating信息的情况
+                if (content === undefined) {
+                    return;
+                }
+                const tds = content.getElementsByTagName('td');
+                this.nowRating = parseInt(tds[1].getElementsByTagName('span')[0].innerHTML);
+                this.maxRating = parseInt(tds[2].getElementsByTagName('span')[0].innerHTML);
+                this.rank = tds[0].innerHTML;
+                this.contestNumber = parseInt(tds[3].innerHTML);
+                return 'OK'
+            } catch (e) {
+                logger.error(e);
+                return e.message;
+            }
+        }
     }
 
     class Contest {
         contestName: string;
         time: Date;
 
-        toString() {
+        toMessage(): string {
             let res: string = '';
             res += `${this.contestName}\n`
             const now: Date = new Date();
@@ -226,78 +283,44 @@ export namespace Atcoder {
      * @param index 下标，范围为0-12
      * @returns 查询后的字符串
      */
-    export async function getContest(index: number) {
-        let message = "";
+    export async function getContest(index: number): Promise<string> {
         let contest: Contest = new Contest();
-        await fetch('https://atcoder.jp/home?lang=ja')
-            .then(response => {
-                if (response.status === 200) {
-                    return response.text()
-                } else {
-                    message = `HTTP:${response.status} error`;
-                }
-            })
-            .then(htmlText => {
-                // html文本转DOM
-                const parser = new window.DOMParser();
-                const doc: Document = parser.parseFromString(htmlText, 'text/html');
+        try {
+            const response = await fetch('https://atcoder.jp/home?lang=ja')
+            if (response.status !== 200) {
+                throw new Error(`获取失败：HTTP ${response.status}`);
+            }
+            const htmlText = await response.text();
+            // html文本转DOM
+            const parser = new window.DOMParser();
+            const doc: Document = parser.parseFromString(htmlText, 'text/html');
 
-                const contestUpcoming = doc.getElementById('contest-table-upcoming');
-                const contestUpcomingTable = contestUpcoming.getElementsByTagName('table')[0];
-                const contests = contestUpcomingTable.getElementsByTagName('tbody')[0].getElementsByTagName('tr');
-                contest.contestName = contests[index].getElementsByTagName('a')[1].innerHTML;
-                const contestTime = contests[index].getElementsByTagName('a')[0].getElementsByTagName('time')[0];
-                contest.time = new Date(contestTime.innerHTML);
-            }).catch(error => {
-                console.error(error)
-                message = error.toString();
-            });
-        message += contest.toString();
-        return message;
+            const contestUpcoming = doc.getElementById('contest-table-upcoming');
+            const contestUpcomingTable = contestUpcoming.getElementsByTagName('table')[0];
+            const contests = contestUpcomingTable.getElementsByTagName('tbody')[0].getElementsByTagName('tr');
+            contest.contestName = contests[index].getElementsByTagName('a')[1].innerHTML;
+            const contestTime = contests[index].getElementsByTagName('a')[0].getElementsByTagName('time')[0];
+            contest.time = new Date(contestTime.innerHTML);
+            return contest.toMessage();
+        } catch (e) {
+            logger.error(e);
+            return e.message;
+        }
     }
 
     /**
-     * 通过用户名获取用户在Atcoder上的竞赛数据
-     * @param user UserProfile对象，userName需要提前存入
-     * @returns 异步程序的执行状态，无异常返回'OK'，否则返回错误信息
+     * 根据用户名获取数据后返回一个UserProfile对象
+     * @param userName 用户名
+     * @returns 获取完数据的UserProfile对象
      */
-    async function getProfileData(user: UserProfile) {
-        let status = 'OK'
-        await fetch(`https://atcoder.jp/users/${user.userName}`)
-            .then(response => {
-                if (response.status === 200) {
-                    return response.text()
-                } else {
-                    status = `HTTP:${response.status} error`;
-                }
-            })
-            .then(htmlText => {
-                if (status != 'OK') return status;
-                // html文本转DOM
-                const parser = new window.DOMParser();
-                const doc: Document = parser.parseFromString(htmlText, 'text/html');
-
-                const main = doc.getElementById('main-container');
-                const mainDiv = main.getElementsByTagName('div')[0];
-                const content = mainDiv.getElementsByTagName('div')[2].getElementsByTagName('table')[0];
-                // 匹配用户存在但是没有rating信息的情况
-                if (content === undefined) {
-                    user.nowRating = 0;
-                    user.maxRating = 0;
-                    user.rank = 'NaN';
-                    user.contestNumber = 0;
-                    return;
-                }
-                const tds = content.getElementsByTagName('td');
-                user.nowRating = parseInt(tds[1].getElementsByTagName('span')[0].innerHTML);
-                user.maxRating = parseInt(tds[2].getElementsByTagName('span')[0].innerHTML);
-                user.rank = tds[0].innerHTML;
-                user.contestNumber = parseInt(tds[3].innerHTML);
-            }).catch(error => {
-                console.error(error)
-                status = error.toString();
-            });
-        return status;
+    export async function initUserProfile(userName: string): Promise<UserProfile> {
+        let userProfile: UserProfile = new UserProfile(userName);
+        const status = await userProfile.getProfileData();
+        if (status !== 'OK') {
+            throw new Error(status);
+        } else {
+            return userProfile;
+        }
     }
 
     /**
@@ -305,15 +328,13 @@ export namespace Atcoder {
      * @param userName Atcoder中的用户名
      * @returns 查询后的字符串
      */
-    export async function getProfile(userName: string) {
-        let message = "Atcoder Profile:\n";
-        let user = new UserProfile(userName);
-        let status = await getProfileData(user);
-        if (status !== 'OK') {
-            return status;
+    export async function getProfile(userName: string): Promise<string> {
+        try {
+            let userProfile: UserProfile = await initUserProfile(userName);
+            return `Atcoder Profile:\n${userProfile.toMessage()}`;
+        } catch (e) {
+            return e.message;
         }
-        message += user.toString();
-        return message;
     }
 }
 
@@ -333,7 +354,7 @@ export namespace Codeforces {
         });
     }
 
-    class UserProfile {
+    export class UserProfile {
         userName: string;
         nowRating: number;
         maxRating: number;
@@ -345,7 +366,7 @@ export namespace Codeforces {
             this.userName = userName;
         }
 
-        setValueByUser(user: User): void {
+        setValueByUser(user): void {
             this.userName = user.handle;
             this.nowRating = (user.rating === undefined) ? 0 : user.rating;
             this.maxRating = (user.maxRating === undefined) ? 0 : user.maxRating;
@@ -354,7 +375,11 @@ export namespace Codeforces {
             this.iconUrl = user.titlePhoto;
         }
 
-        toString() {
+        /**
+         * 生成文字版个人信息
+         * @returns 返回转换后的文字
+         */
+        toMessage(): string {
             let res: string = "";
             res += `昵称: ${this.userName}\n`
             res += `rating: ${this.nowRating}\n`
@@ -366,6 +391,28 @@ export namespace Codeforces {
             }
             return res;
         }
+
+        /**
+         * 通过用户名获取用户在Codeforces上的刷题/竞赛数据
+         * @returns 无异常返回'OK'，否则返回错误信息
+         */
+        async getProfileData(): Promise<string> {
+            try {
+                const response = await CodeforcesAPI.call("user.info", { handles: this.userName })
+                if (response.status !== "OK") {
+                    throw new Error(response.comment)
+                }
+                const user = response.result[0];
+                if (user.handle !== this.userName) {
+                    return '此用户不存在'
+                }
+                this.setValueByUser(user);
+                return 'OK';
+            } catch (e) {
+                logger.error(e);
+                return e.message;
+            }
+        }
     }
 
     /**
@@ -373,82 +420,64 @@ export namespace Codeforces {
      * @param index 查询即将到来的竞赛的下标
      * @returns 查询后的字符串
      */
-    export async function getContest(index: number) {
+    export async function getContest(index: number): Promise<string> {
         let message = "";
+        try {
+            const response = await CodeforcesAPI.call("contest.list", {})
+            if (response.status !== "OK") {
+                throw new Error(response.comment)
+            }
+            const contests = response.result;
+            let begin: number = 0;
+            while (contests[begin + 1].phase !== 'FINISHED') {
+                begin++;
+            }
 
-        await CodeforcesAPI.call("contest.list", {})
-            .then(response => {
-                if (response.status == "OK") {
-                    const contests = response.result;
-                    let begin: number = 0;
-                    while (contests[begin + 1].phase !== 'FINISHED') {
-                        begin++;
-                    }
-
-                    let name: string = contests[begin - index].name;
-                    for (let i: number = 0; i < name.length - 1; i++) {
-                        if (name[i] === '.' && name[i + 1] !== ' ') {
-                            // 此举是为了防止竞赛名含有url被qq识别然后被ban
-                            name = name.slice(0, i + 1) + ' ' + name.slice(i + 1);
-                        }
-                    }
-
-                    message += `${name}\n`;
-                    const date: Date = new Date(contests[begin - index].startTimeSeconds * 1000);
-                    const diff = new Date(Math.abs(contests[begin - index].relativeTimeSeconds * 1000));
-                    message += `${(diff.getDate() === 1) ? "今天" : (diff.getDate() - 1 + "天后")}     ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
-                } else {
-                    message = response.comment;
-                }
-            }).catch(error => {
-                console.error(error)
-                message = error.toString();
-            });
-        return message;
-    }
-
-    /**
-     * 通过用户名获取用户在Codeforces上的竞赛数据
-     * @param user UserProfile对象，userName需要提前存入
-     * @returns 异步程序的执行状态，无异常返回'OK'，否则返回错误信息
-     */
-    async function getProfileData(userProfile: UserProfile) {
-        let status = "OK";
-        await CodeforcesAPI.call("user.info", { handles: userProfile.userName }).then(response => {
-            if (response.status === "OK") {
-                const user: User = response.result[0];
-                userProfile.setValueByUser(user);
-            } else {
-                if (response.comment === "apiKey: Incorrect signature") {
-                    status = "配置项的secret不正确"
-                } else if (response.comment === "apiKey: Incorrect API key") {
-                    status = "配置项的key不正确"
-                } else if (response.comment === `handles: User with handle ${userProfile.userName} not found`) {
-                    status = `此用户不存在`
-                } else {
-                    status = response.comment;
+            let name: string = contests[begin - index].name;
+            // 此举是为了防止竞赛名含有url被qq识别然后被ban
+            for (let i: number = 0; i < name.length - 1; i++) {
+                if (name[i] === '.' && name[i + 1] !== ' ') {
+                    name = name.slice(0, i + 1) + ' ' + name.slice(i + 1);
                 }
             }
-        }).catch(error => {
-            console.error(error);
-            status = error.toString();
-        });
-        return status;
+
+            message += `${name}\n`;
+            const date: Date = new Date(contests[begin - index].startTimeSeconds * 1000);
+            const diff = new Date(Math.abs(contests[begin - index].relativeTimeSeconds * 1000));
+            message += `${(diff.getDate() === 1) ? "今天" : (diff.getDate() - 1 + "天后")}     ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+            return message;
+        } catch (e) {
+            logger.error(e)
+            return e.message
+        }
     }
 
     /**
-     * 查询CodeForces用户的个人信息
+     * 根据用户名获取数据后返回一个UserProfile对象
      * @param userName 用户名
+     * @returns 获取完数据的UserProfile对象
+     */
+    export async function initUserProfile(userName: string): Promise<UserProfile> {
+        let userProfile: UserProfile = new UserProfile(userName);
+        const status = await userProfile.getProfileData();
+        if (status !== 'OK') {
+            throw new Error(status);
+        } else {
+            return userProfile;
+        }
+    }
+
+    /**
+     * 查询Atcoder用户的个人信息
+     * @param userName Atcoder中的用户名
      * @returns 查询后的字符串
      */
-    export async function getProfile(userName: string) {
-        let message = "CodeForces Profile:\n";
-        let user: UserProfile = new UserProfile(userName);
-        let status = await getProfileData(user);
-        if (status !== 'OK') {
-            return status;
+    export async function getProfile(userName: string): Promise<string> {
+        try {
+            let userProfile: UserProfile = await initUserProfile(userName);
+            return `Codeforces Profile:\n${userProfile.toMessage()}`;
+        } catch (e) {
+            return e.message;
         }
-        message += user.toString();
-        return message;
     }
 }

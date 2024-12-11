@@ -42,12 +42,17 @@ export function apply(ctx: Context, config: Config) {
     cfName: 'string'
   })
 
-  Codeforces.setCredentials(config.key, config.secret);
+  if (config.key === "" || config.secret === "") {
+    logger.warn("Codeforces key或secret为空，相关功能可能无法正常使用。");
+  } else {
+    Codeforces.setCredentials(config.key, config.secret);
+  }
 
   // 算法竞赛总指令，方便统一查看指令，以及让help菜单不那么臃肿
-  ctx.command('算法竞赛', '使用"help 算法竞赛"查看更多指令')
+  ctx.command('算法竞赛', '算法竞赛总指令，功能由子指令实现')
     .action(({ session }) => {
-      return '使用"help 算法竞赛"查看更多指令';
+      session.execute('help 算法竞赛')
+      // return '使用"help 算法竞赛"查看更多指令';
     })
 
   ctx.command('算法竞赛')
@@ -90,13 +95,29 @@ export function apply(ctx: Context, config: Config) {
       if (userName === undefined) {
         let userId: string = session.event.user.id;
         let userData = await ctx.database.get('binding', { pid: userId })
-        if (userData.length === 0 || userData[0].niukeName === undefined) {
+        if (userData.length === 0 || userData[0].niukeName === undefined || userData[0].niukeName === '') {
           return `给个名字吧朋友，不然我查谁呢`;
         }
         userName = userData[0].niukeName;
       }
-      return Niuke.getProfile(userName);
+      console.log('name OK');
+      return await Niuke.getProfile(userName);
     })
+
+  ctx.command('算法竞赛')
+    .subcommand('牛客竞赛日历', '查看牛客的竞赛日历').alias('niukeCalendar')
+    .action(async ({ session }) => {
+      try {
+        let page = await ctx.puppeteer.page();
+        await page.setViewport({ width: 1920, height: 1080 });
+        await page.goto('https://ac.nowcoder.com/acm/contest/calendar')
+        await page.waitForNetworkIdle();
+        const contestBox = await page.$('.date-table');
+        return segment.image(await contestBox.screenshot(), "image/png");
+      } catch (e) {
+        logger.error(e);
+      }
+    });
 
   ctx.command('算法竞赛')
     .subcommand('Atcoder竞赛', '查看Atcoder最近竞赛').alias('atc')
@@ -127,10 +148,10 @@ export function apply(ctx: Context, config: Config) {
   ctx.command('算法竞赛')
     .subcommand('Atcoder个人信息 <userName:string>', '查询Atcoder上指定用户的信息').alias('atcprofile')
     .action(async ({ session }, userName: string) => {
-      if (userName === undefined) {
+      if (userName === undefined || userName === '') {
         let userId: string = session.event.user.id;
         let userData = await ctx.database.get('binding', { pid: userId })
-        if (userData.length === 0 || userData[0].atcName === undefined) {
+        if (userData.length === 0 || userData[0].atcName === undefined || userData[0].atcName === '') {
           return `给个名字吧朋友，不然我查谁呢`;
         }
         userName = userData[0].atcName;
@@ -166,7 +187,7 @@ export function apply(ctx: Context, config: Config) {
       if (userName === undefined) {
         let userId: string = session.event.user.id;
         let userData = await ctx.database.get('binding', { pid: userId })
-        if (userData.length === 0 || userData[0].cfName === undefined) {
+        if (userData.length === 0 || userData[0].cfName === undefined || userData[0].cfName === '') {
           return `给个名字吧朋友，不然我查谁呢`;
         }
         userName = userData[0].cfName;
