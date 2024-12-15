@@ -6,6 +6,8 @@ export const name = 'acm-contest'
 
 export const logger = new Logger("acm-contest");
 
+type Platform = 'niuke' | 'atc' | 'cf' | 'luogu';
+
 // 定义Config
 export interface Config {
   key: string
@@ -48,13 +50,43 @@ export function apply(ctx: Context, config: Config) {
     Codeforces.setCredentials(config.key, config.secret);
   }
 
+  /**
+   * 在**个人信息中，查找用户绑定的名字
+   * @param userId 用户id，用来在数据库中查询用户名
+   * @param platform 查询平台
+   * @returns 用户绑定的名字，找不到时返回empty
+   */
+  const getName = async (userId: string, platform: Platform): Promise<string> => {
+    const userDatas = await ctx.database.get('binding', { pid: userId })
+    if (userDatas.length === 0) {
+      return 'empty'
+    }
+    const userData = userDatas[0];
+    if (platform === 'niuke') {
+      if (userData.niukeName === undefined || userData.niukeName === '') {
+        return 'empty';
+      }
+      return userData.niukeName;
+    } else if (platform === 'atc') {
+      if (userData.atcName === undefined || userData.atcName === '') {
+        return 'empty';
+      }
+      return userData.atcName;
+    } else if (platform === 'cf') {
+      if (userData.cfName === undefined || userData.cfName === '') {
+        return 'empty';
+      }
+      return userData.cfName;
+    }
+  }
+
   // 算法竞赛总指令，方便统一查看指令，以及让help菜单不那么臃肿
   ctx.command('算法竞赛', '算法竞赛总指令，功能由子指令实现')
     .action(({ session }) => {
       session.execute('help 算法竞赛')
-      // return '使用"help 算法竞赛"查看更多指令';
     })
 
+  // 最近竞赛指令
   ctx.command('算法竞赛')
     .subcommand('最近竞赛', '查看最近竞赛').alias('acm')
     .usage('目前支持查询的竞赛oj：牛客、Atcoder、CodeForces')
@@ -93,12 +125,10 @@ export function apply(ctx: Context, config: Config) {
     .subcommand('牛客个人信息 <userName:string>', '查询牛客上指定用户的信息').alias('niukeProfile')
     .action(async ({ session }, userName) => {
       if (userName === undefined) {
-        let userId: string = session.event.user.id;
-        let userData = await ctx.database.get('binding', { pid: userId })
-        if (userData.length === 0 || userData[0].niukeName === undefined || userData[0].niukeName === '') {
+        userName = await getName(session.event.user.id, 'niuke');
+        if (userName === 'empty') {
           return `给个名字吧朋友，不然我查谁呢`;
         }
-        userName = userData[0].niukeName;
       }
       return await Niuke.getProfile(userName);
     })
@@ -148,12 +178,10 @@ export function apply(ctx: Context, config: Config) {
     .subcommand('Atcoder个人信息 <userName:string>', '查询Atcoder上指定用户的信息').alias('atcprofile')
     .action(async ({ session }, userName: string) => {
       if (userName === undefined || userName === '') {
-        let userId: string = session.event.user.id;
-        let userData = await ctx.database.get('binding', { pid: userId })
-        if (userData.length === 0 || userData[0].atcName === undefined || userData[0].atcName === '') {
+        userName = await getName(session.event.user.id, 'atc');
+        if (userName === 'empty') {
           return `给个名字吧朋友，不然我查谁呢`;
         }
-        userName = userData[0].atcName;
       }
       return await Atcoder.getProfile(userName);
     })
@@ -184,12 +212,10 @@ export function apply(ctx: Context, config: Config) {
     .subcommand('Codeforces个人信息 <userName:string>', '查询Codeforces上指定用户的信息').alias('cfprofile')
     .action(async ({ session }, userName) => {
       if (userName === undefined) {
-        let userId: string = session.event.user.id;
-        let userData = await ctx.database.get('binding', { pid: userId })
-        if (userData.length === 0 || userData[0].cfName === undefined || userData[0].cfName === '') {
+        userName = await getName(session.event.user.id, 'cf');
+        if (userName === 'empty') {
           return `给个名字吧朋友，不然我查谁呢`;
         }
-        userName = userData[0].cfName;
       }
       return Codeforces.getProfile(userName);
     })
