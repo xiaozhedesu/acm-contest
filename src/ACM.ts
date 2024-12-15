@@ -1,15 +1,12 @@
-import { JSDOM } from 'jsdom'
 import { CodeforcesAPI } from "codeforces-api-ts"
 import { logger } from "./index"
-
-
-// html转DOM元素进行操作的依赖
-const { window } = new JSDOM(`<!DOCTYPE html><p>Hello world</p>`);
+import { Tool } from './Tool';
 
 /**
  * 牛客相关函数
  */
 export namespace Niuke {
+    const USER_NOT_FOUND: string = '查无此人，请确认名称输入正确且6个月内参加过至少一场牛客竞赛';
     export class UserProfile {
         userName: string;
         userID: string;
@@ -42,24 +39,17 @@ export namespace Niuke {
          * @returns 无异常返回'OK'，否则返回错误信息
          */
         async getUserID(): Promise<string> {
-            const response = await fetch(`https://ac.nowcoder.com/acm/contest/rating-index?searchUserName=${this.userName}`)
-            if (response.status !== 200) {
-                throw new Error(`获取失败：HTTP ${response.status}`);
-            }
-            const htmlText = await response.text();
-
-            // html文本转DOM
-            const parser = new window.DOMParser();
-            const doc: Document = parser.parseFromString(htmlText, 'text/html');
+            const url = `https://ac.nowcoder.com/acm/contest/rating-index?searchUserName=${this.userName}`;
+            const doc = await Tool.getWebsiteDocument(url);
 
             const table = doc.getElementsByTagName('table')[0];
             if (table === undefined) {
-                return '查无此人，请确认名称输入正确且6个月内参加过至少一场牛客竞赛';
+                return USER_NOT_FOUND;
             }
             const td = table.getElementsByTagName('tr')[1].getElementsByTagName('td')[1];
             const name = td.getElementsByTagName('span')[0].innerHTML;
             if (name !== this.userName) {
-                return '查无此人，请确认名称输入正确且6个月内参加过至少一场牛客竞赛';
+                return USER_NOT_FOUND;
             }
             let profileURL = td.getElementsByTagName('a')[0].getAttribute('href').split('/');
             this.userID = profileURL[profileURL.length - 1];
@@ -77,50 +67,26 @@ export namespace Niuke {
                 return status;
             }
 
-            await fetch(`https://ac.nowcoder.com/acm/contest/profile/${this.userID}`)
-                .then(response => {
-                    if (response.status === 200) {
-                        return response.text()
-                    } else {
-                        throw new Error(`获取失败：HTTP ${response.status}`);
-                    }
-                })
-                .then(htmlText => {
-                    // html文本转DOM
-                    const parser = new window.DOMParser();
-                    const doc: Document = parser.parseFromString(htmlText, 'text/html');
+            {   // 用户主页
+                const url = `https://ac.nowcoder.com/acm/contest/profile/${this.userID}`;
+                const doc = await Tool.getWebsiteDocument(url);
 
-                    const contestStateItems = doc.getElementsByClassName('my-state-main')[0].getElementsByClassName('my-state-item');
-                    const rating = contestStateItems[0].getElementsByTagName('div')[0].innerHTML;
-                    this.rating = parseInt(rating);
-                    this.rank = contestStateItems[1].getElementsByTagName('div')[0].innerHTML;
-                    this.contestNumberRated = parseInt(contestStateItems[2].getElementsByTagName('div')[0].innerHTML);
-                    this.contestNumberUnrated = parseInt(contestStateItems[3].getElementsByTagName('div')[0].innerHTML);
-                }).catch(error => {
-                    logger.error(error)
-                    status = error.message;
-                });
-            if (status != 'OK') return status;
+                const contestStateItems = doc.getElementsByClassName('my-state-main')[0].getElementsByClassName('my-state-item');
+                const rating = contestStateItems[0].getElementsByTagName('div')[0].innerHTML;
+                this.rating = parseInt(rating);
+                this.rank = contestStateItems[1].getElementsByTagName('div')[0].innerHTML;
+                this.contestNumberRated = parseInt(contestStateItems[2].getElementsByTagName('div')[0].innerHTML);
+                this.contestNumberUnrated = parseInt(contestStateItems[3].getElementsByTagName('div')[0].innerHTML);
+            }
 
-            await fetch(`https://ac.nowcoder.com/acm/contest/profile/${this.userID}/practice-coding`)
-                .then(response => {
-                    if (response.status === 200) {
-                        return response.text()
-                    } else {
-                        throw new Error(`获取失败：HTTP ${response.status}`);
-                    }
-                })
-                .then(htmlText => {
-                    // html文本转DOM
-                    const parser = new window.DOMParser();
-                    const doc: Document = parser.parseFromString(htmlText, 'text/html');
+            {   // 用户练习页面
+                const url = `https://ac.nowcoder.com/acm/contest/profile/${this.userID}/practice-coding`;
+                const doc = await Tool.getWebsiteDocument(url);
 
-                    const stateItems = doc.getElementsByClassName('my-state-main')[0].getElementsByClassName('my-state-item');
-                    this.passNumber = parseInt(stateItems[1].getElementsByTagName('div')[0].innerHTML);
-                }).catch(error => {
-                    logger.error(error)
-                    status = error.message;
-                })
+                const stateItems = doc.getElementsByClassName('my-state-main')[0].getElementsByClassName('my-state-item');
+                this.passNumber = parseInt(stateItems[1].getElementsByTagName('div')[0].innerHTML);
+            }
+
             return status;
         }
     }
@@ -158,16 +124,8 @@ export namespace Niuke {
         let contest = new Contest();
         const url = "https://ac.nowcoder.com";
         try {
-            const response = await fetch(url, { method: 'GET' })
-            if (response.status !== 200) {
-                throw new Error(`获取失败：HTTP ${response.status}`);
-            }
-            const htmlText = await response.text();
-            // html文本转DOM
-            const parser = new window.DOMParser();
-            const doc: Document = parser.parseFromString(htmlText, 'text/html');
-
-            const acmList = doc.getElementsByClassName('acm-list');
+            const document = await Tool.getWebsiteDocument(url);
+            const acmList = document.getElementsByClassName('acm-list');
             const acmItems = acmList[0].getElementsByClassName('acm-item');
             contest.contestName = acmItems[index].getElementsByTagName('a')[0].innerHTML;
             contest.countdown = acmItems[index].getElementsByClassName('acm-item-time')[0].innerHTML.trim();
@@ -234,17 +192,11 @@ export namespace Atcoder {
          * @returns 无异常返回'OK'，否则返回错误信息
          */
         async getProfileData(): Promise<string> {
+            const url = `https://atcoder.jp/users/${this.userName}`;
             try {
-                const response = await fetch(`https://atcoder.jp/users/${this.userName}`)
-                if (response.status !== 200) {
-                    throw new Error(`获取失败：HTTP ${response.status}`);
-                }
-                const htmlText = await response.text();
-                // html文本转DOM
-                const parser = new window.DOMParser();
-                const doc: Document = parser.parseFromString(htmlText, 'text/html');
+                const document = await Tool.getWebsiteDocument(url);
 
-                const main = doc.getElementById('main-container');
+                const main = document.getElementById('main-container');
                 const mainDiv = main.getElementsByTagName('div')[0];
                 const content = mainDiv.getElementsByTagName('div')[2].getElementsByTagName('table')[0];
                 // 匹配用户存在但是没有rating信息的情况
@@ -285,17 +237,11 @@ export namespace Atcoder {
      */
     export async function getContest(index: number): Promise<string> {
         let contest: Contest = new Contest();
+        const url = 'https://atcoder.jp/home?lang=ja';
         try {
-            const response = await fetch('https://atcoder.jp/home?lang=ja')
-            if (response.status !== 200) {
-                throw new Error(`获取失败：HTTP ${response.status}`);
-            }
-            const htmlText = await response.text();
-            // html文本转DOM
-            const parser = new window.DOMParser();
-            const doc: Document = parser.parseFromString(htmlText, 'text/html');
+            const document = await Tool.getWebsiteDocument(url);
 
-            const contestUpcoming = doc.getElementById('contest-table-upcoming');
+            const contestUpcoming = document.getElementById('contest-table-upcoming');
             const contestUpcomingTable = contestUpcoming.getElementsByTagName('table')[0];
             const contests = contestUpcomingTable.getElementsByTagName('tbody')[0].getElementsByTagName('tr');
             contest.contestName = contests[index].getElementsByTagName('a')[1].innerHTML;

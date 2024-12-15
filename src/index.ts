@@ -100,7 +100,6 @@ export function apply(ctx: Context, config: Config) {
         }
         userName = userData[0].niukeName;
       }
-      console.log('name OK');
       return await Niuke.getProfile(userName);
     })
 
