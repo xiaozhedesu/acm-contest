@@ -151,7 +151,6 @@ export namespace Niuke {
     export async function getProfile(userName: string): Promise<string> {
         try {
             let userProfile: UserProfile = await initUserProfile(userName);
-            console.log(userProfile.toString());
             return `Niuke Profile:\n${userProfile.toMessage()}`;
         } catch (e) {
             return e.message;
