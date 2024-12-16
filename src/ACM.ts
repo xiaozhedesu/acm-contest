@@ -7,7 +7,7 @@ import { Tool } from './Tool';
  */
 export namespace Niuke {
     const USER_NOT_FOUND: string = '查无此人，请确认名称输入正确且6个月内参加过至少一场牛客竞赛';
-    export class UserProfile {
+    export interface UserProfile {
         userName: string;
         userID: string;
         rating: number;
@@ -15,7 +15,9 @@ export namespace Niuke {
         contestNumberRated: number;
         contestNumberUnrated: number;
         passNumber: number;
+    }
 
+    export class UserProfile {
         constructor(userName: string) {
             this.userName = userName;
         }
@@ -34,15 +36,17 @@ export namespace Niuke {
             return res;
         }
 
+        toString(): string { return JSON.stringify(this, null, 4); }
+
         /**
          * 根据用户名找对应的userID
          * @returns 无异常返回'OK'，否则返回错误信息
          */
         async getUserID(): Promise<string> {
             const url = `https://ac.nowcoder.com/acm/contest/rating-index?searchUserName=${this.userName}`;
-            const doc = await Tool.getWebsiteDocument(url);
+            const document = await Tool.getWebsiteDocument(url);
 
-            const table = doc.getElementsByTagName('table')[0];
+            const table = document.getElementsByTagName('table')[0];
             if (table === undefined) {
                 return USER_NOT_FOUND;
             }
@@ -69,9 +73,9 @@ export namespace Niuke {
 
             {   // 用户主页
                 const url = `https://ac.nowcoder.com/acm/contest/profile/${this.userID}`;
-                const doc = await Tool.getWebsiteDocument(url);
+                const document = await Tool.getWebsiteDocument(url);
 
-                const contestStateItems = doc.getElementsByClassName('my-state-main')[0].getElementsByClassName('my-state-item');
+                const contestStateItems = document.getElementsByClassName('my-state-main')[0].getElementsByClassName('my-state-item');
                 const rating = contestStateItems[0].getElementsByTagName('div')[0].innerHTML;
                 this.rating = parseInt(rating);
                 this.rank = contestStateItems[1].getElementsByTagName('div')[0].innerHTML;
@@ -81,9 +85,9 @@ export namespace Niuke {
 
             {   // 用户练习页面
                 const url = `https://ac.nowcoder.com/acm/contest/profile/${this.userID}/practice-coding`;
-                const doc = await Tool.getWebsiteDocument(url);
+                const document = await Tool.getWebsiteDocument(url);
 
-                const stateItems = doc.getElementsByClassName('my-state-main')[0].getElementsByClassName('my-state-item');
+                const stateItems = document.getElementsByClassName('my-state-main')[0].getElementsByClassName('my-state-item');
                 this.passNumber = parseInt(stateItems[1].getElementsByTagName('div')[0].innerHTML);
             }
 
@@ -91,28 +95,15 @@ export namespace Niuke {
         }
     }
 
-    /**
-     * 根据用户名获取数据后返回一个UserProfile对象
-     * @param userName 用户名
-     * @returns 获取完数据的UserProfile对象
-     */
-    export async function initUserProfile(userName: string): Promise<UserProfile> {
-        let userProfile: UserProfile = new UserProfile(userName);
-        const status = await userProfile.getProfileData();
-        if (status !== 'OK') {
-            throw new Error(status);
-        } else {
-            return userProfile;
-        }
+    interface Contest {
+        contestName: string;
+        countdown: string;
     }
 
     class Contest {
-        contestName: string;
-        countdown: string;
+        toMessage(): string { return `${this.contestName}\n${this.countdown}`; }
 
-        toMessage(): string {
-            return `${this.contestName}\n${this.countdown}`;
-        }
+        toString(): string { return JSON.stringify(this, null, 4); }
     }
 
     /**
@@ -138,6 +129,21 @@ export namespace Niuke {
     }
 
     /**
+     * 根据用户名获取数据后返回一个UserProfile对象
+     * @param userName 用户名
+     * @returns 获取完数据的UserProfile对象
+     */
+    export async function initUserProfile(userName: string): Promise<UserProfile> {
+        let userProfile: UserProfile = new UserProfile(userName);
+        const status = await userProfile.getProfileData();
+        if (status !== 'OK') {
+            throw new Error(status);
+        } else {
+            return userProfile;
+        }
+    }
+
+    /**
      * 查询牛客竞赛用户的个人信息
      * @param userName 用户名
      * @returns 查询后的字符串
@@ -145,6 +151,7 @@ export namespace Niuke {
     export async function getProfile(userName: string): Promise<string> {
         try {
             let userProfile: UserProfile = await initUserProfile(userName);
+            console.log(userProfile.toString());
             return `Niuke Profile:\n${userProfile.toMessage()}`;
         } catch (e) {
             return e.message;
@@ -156,13 +163,15 @@ export namespace Niuke {
  * Atcoder相关函数
  */
 export namespace Atcoder {
-    class UserProfile {
+    export interface UserProfile {
         userName: string
         nowRating: number
         maxRating: number
         rank: string
         contestNumber: number
+    }
 
+    export class UserProfile {
         constructor(userName: string) {
             this.userName = userName;
             this.nowRating = 0;
@@ -186,6 +195,8 @@ export namespace Atcoder {
             }
             return res;
         }
+
+        toString(): string { return JSON.stringify(this, null, 4); }
 
         /**
          * 通过用户名获取用户在Atcoder上的竞赛数据
@@ -216,10 +227,12 @@ export namespace Atcoder {
         }
     }
 
-    class Contest {
+    interface Contest {
         contestName: string;
         time: Date;
+    }
 
+    class Contest {
         toMessage(): string {
             let res: string = '';
             res += `${this.contestName}\n`
@@ -228,6 +241,8 @@ export namespace Atcoder {
             res += `${(diff.getDate() === 1) ? "今天" : (diff.getDate() - 1 + "天后")}     ${String(this.time.getHours()).padStart(2, '0')}:${String(this.time.getMinutes()).padStart(2, '0')}`;
             return res;
         }
+
+        toString(): string { return JSON.stringify(this, null, 4); }
     }
 
     /**
@@ -300,14 +315,16 @@ export namespace Codeforces {
         });
     }
 
-    export class UserProfile {
+    export interface UserProfile {
         userName: string;
         nowRating: number;
         maxRating: number;
         rank: string;
         maxRank: string;
         iconUrl: string;
+    }
 
+    export class UserProfile {
         constructor(userName: string) {
             this.userName = userName;
         }
@@ -337,6 +354,8 @@ export namespace Codeforces {
             }
             return res;
         }
+
+        toString(): string { return JSON.stringify(this, null, 4); }
 
         /**
          * 通过用户名获取用户在Codeforces上的刷题/竞赛数据
